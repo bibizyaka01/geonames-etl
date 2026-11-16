@@ -1,0 +1,8 @@
+# Windows host with 16 GB RAM: starting budget, verify under actual load.
+# Merge into %USERPROFILE%\.wslconfig, then quit Docker Desktop,
+# run wsl --shutdown, and start Docker Desktop again.
+# These limits apply to ALL WSL2 distributions, not only this project.
+[wsl2]
+memory=6GB
+processors=4
+swap=2GB

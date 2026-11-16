@@ -1,0 +1,215 @@
+name: geonames-etl
+
+x-airflow-common: &airflow-common
+  image: geonames-airflow:dev
+  build: .
+  user: "50000:0"
+  environment: &airflow-env
+    AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+    AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg://${AIRFLOW_DB_USER:-airflow}:${AIRFLOW_DB_PASSWORD:?Run docker/setup-env.ps1}@postgres-meta:5432/${AIRFLOW_DB:-airflow}
+    AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql+psycopg://${AIRFLOW_DB_USER:-airflow}:${AIRFLOW_DB_PASSWORD:?Run docker/setup-env.ps1}@postgres-meta:5432/${AIRFLOW_DB:-airflow}
+    AIRFLOW__CELERY__BROKER_URL: redis://redis:6379/0
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:?Run docker/setup-env.ps1}
+    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET:?Run docker/setup-env.ps1}
+    AIRFLOW__API__SECRET_KEY: ${AIRFLOW_API_SECRET_KEY:?Run docker/setup-env.ps1}
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+    AIRFLOW__CORE__DEFAULT_TIMEZONE: UTC
+    AIRFLOW__CORE__PARALLELISM: "1"
+    AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: "1"
+    AIRFLOW__CORE__MAX_ACTIVE_RUNS_PER_DAG: "1"
+    AIRFLOW__DAG_PROCESSOR__PARSING_PROCESSES: "1"
+    AIRFLOW__DATABASE__SQL_ALCHEMY_POOL_SIZE: "2"
+    AIRFLOW__DATABASE__SQL_ALCHEMY_MAX_OVERFLOW: "2"
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
+    AIRFLOW__CELERY__WORKER_CONCURRENCY: "1"
+    AIRFLOW__CELERY_BROKER_TRANSPORT_OPTIONS__VISIBILITY_TIMEOUT: "86400"
+    AIRFLOW__API__WORKERS: "1"
+    AIRFLOW_CONN_GEONAMES_DWH: postgresql://${DWH_USER:-geonames}:${DWH_PASSWORD:?Run docker/setup-env.ps1}@postgres-dwh:5432/${DWH_DB:-geonames}
+    GEONAMES_MODE: ${GEONAMES_MODE:-lite}
+    GEONAMES_DATA_DIR: /opt/airflow/data
+  volumes:
+    - airflow-logs:/opt/airflow/logs
+    - geonames-data:/opt/airflow/data
+  networks:
+    - platform
+  # Leave failed containers stopped while tuning memory instead of restart loops.
+  restart: "no"
+  depends_on: &airflow-depends
+    postgres-meta:
+      condition: service_healthy
+    postgres-dwh:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    airflow-init:
+      condition: service_completed_successfully
+
+services:
+  postgres-meta:
+    image: postgres:16-bookworm
+    mem_limit: 256m
+    memswap_limit: 256m
+    cpus: 0.5
+    command: [postgres, -c, shared_buffers=64MB, -c, work_mem=4MB, -c, max_connections=40]
+    environment:
+      POSTGRES_DB: ${AIRFLOW_DB:-airflow}
+      POSTGRES_USER: ${AIRFLOW_DB_USER:-airflow}
+      POSTGRES_PASSWORD: ${AIRFLOW_DB_PASSWORD:?Run docker/setup-env.ps1}
+    volumes:
+      - postgres-meta-data:/var/lib/postgresql/data
+    networks: [platform]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+  postgres-dwh:
+    image: postgres:16-bookworm
+    mem_limit: 384m
+    memswap_limit: 384m
+    cpus: 1.0
+    command: [postgres, -c, shared_buffers=64MB, -c, work_mem=4MB, -c, maintenance_work_mem=64MB, -c, max_connections=20]
+    environment:
+      POSTGRES_DB: ${DWH_DB:-geonames}
+      POSTGRES_USER: ${DWH_USER:-geonames}
+      POSTGRES_PASSWORD: ${DWH_PASSWORD:?Run docker/setup-env.ps1}
+    ports:
+      - "127.0.0.1:${DWH_HOST_PORT:-5433}:5432"
+    volumes:
+      - postgres-dwh-data:/var/lib/postgresql/data
+      - ./sql/init:/docker-entrypoint-initdb.d:ro
+    networks: [platform]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.2-bookworm
+    mem_limit: 128m
+    memswap_limit: 128m
+    cpus: 0.25
+    command: [redis-server, --save, "", --appendonly, "no"]
+    networks: [platform]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  airflow-init:
+    <<: *airflow-common
+    mem_limit: 768m
+    memswap_limit: 768m
+    cpus: 1.0
+    user: "0:0"
+    entrypoint: [/bin/bash, /opt/airflow/docker/init-airflow.sh]
+    environment:
+      <<: *airflow-env
+      AIRFLOW_ADMIN_USERNAME: ${AIRFLOW_ADMIN_USERNAME:-admin}
+      AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:?Run docker/setup-env.ps1}
+      AIRFLOW_ADMIN_EMAIL: ${AIRFLOW_ADMIN_EMAIL:-admin@example.com}
+    depends_on:
+      postgres-meta:
+        condition: service_healthy
+      postgres-dwh:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: "no"
+
+  airflow-apiserver:
+    <<: *airflow-common
+    mem_limit: 1024m
+    memswap_limit: 1024m
+    cpus: 1.0
+    command: api-server
+    ports:
+      - "127.0.0.1:${AIRFLOW_HOST_PORT:-8080}:8080"
+    healthcheck:
+      test: [CMD, curl, --fail, --silent, http://localhost:8080/api/v2/monitor/health]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  airflow-scheduler:
+    <<: *airflow-common
+    mem_limit: 768m
+    memswap_limit: 768m
+    cpus: 1.0
+    command: scheduler
+    healthcheck:
+      test: [CMD, curl, --fail, --silent, http://localhost:8974/health]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  airflow-dag-processor:
+    <<: *airflow-common
+    mem_limit: 768m
+    memswap_limit: 768m
+    cpus: 0.5
+    command: dag-processor
+    healthcheck:
+      test: [CMD-SHELL, 'airflow jobs check --job-type DagProcessorJob --hostname "$${HOSTNAME}"']
+      interval: 30s
+      timeout: 20s
+      retries: 10
+      start_period: 60s
+
+  airflow-triggerer:
+    <<: *airflow-common
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: 0.5
+    command: triggerer
+    healthcheck:
+      test: [CMD-SHELL, 'airflow jobs check --job-type TriggererJob --hostname "$${HOSTNAME}"']
+      interval: 30s
+      timeout: 20s
+      retries: 10
+      start_period: 60s
+
+  airflow-worker:
+    <<: *airflow-common
+    mem_limit: 1024m
+    memswap_limit: 1024m
+    cpus: 1.0
+    command: celery worker
+    environment:
+      <<: *airflow-env
+      DUMB_INIT_SETSID: "0"
+    depends_on:
+      <<: *airflow-depends
+      airflow-apiserver:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD-SHELL, 'celery --app airflow.providers.celery.executors.celery_executor.app inspect ping -d "celery@$${HOSTNAME}" --timeout 5']
+      interval: 30s
+      timeout: 20s
+      retries: 10
+      start_period: 60s
+    stop_grace_period: 60s
+
+networks:
+  platform:
+    driver: bridge
+
+volumes:
+  postgres-meta-data:
+  postgres-dwh-data:
+  airflow-logs:
+  geonames-data:

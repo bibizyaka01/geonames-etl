@@ -17,5 +17,6 @@ ENV AIRFLOW__CORE__LOAD_EXAMPLES=False
 COPY --chown=airflow:root dags/ /opt/airflow/dags/
 COPY --chown=airflow:root src/ /opt/airflow/src/
 COPY --chown=airflow:root sql/ /opt/airflow/sql/
+COPY --chown=airflow:root docker/init-airflow.sh docker/init-airflow.py /opt/airflow/docker/
 
 ENV PYTHONPATH="/opt/airflow/src"
