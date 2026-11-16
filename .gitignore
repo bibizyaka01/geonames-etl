@@ -1,0 +1,24 @@
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+
+# Python and tools
+__pycache__/
+*.py[cod]
+.venv/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Runtime files and downloaded data
+logs/
+data/
+*.zip
+
+# IDE and operating system
+.idea/
+.vscode/
+Thumbs.db
+.DS_Store
