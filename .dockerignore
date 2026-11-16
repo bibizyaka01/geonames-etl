@@ -1,0 +1,12 @@
+# Send only build inputs to the Docker daemon; exclude local secrets and Git.
+*
+!Dockerfile
+!requirements.txt
+!docker/
+!docker/constraints-3.12.txt
+!dags/
+!dags/**
+!src/
+!src/**
+!sql/
+!sql/**

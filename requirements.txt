@@ -1,0 +1,6 @@
+# Versions from the Airflow 3.4.0 constraints for Python 3.12.
+apache-airflow-providers-celery==3.26.0
+apache-airflow-providers-fab==3.10.2
+apache-airflow-providers-postgres==7.1.1
+psycopg[binary]==3.3.6
+requests==2.34.2

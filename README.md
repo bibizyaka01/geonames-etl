@@ -37,8 +37,43 @@ tests/                 проверки поведения ETL
 
 ## Текущее состояние
 
-Создан каркас проекта. Dockerfile, Compose, DAG и CI будут добавлены на следующих
-этапах. Запуск платформы пока не реализован.
+Созданы каркас проекта и Dockerfile собственного образа Airflow.
+Compose, DAG и CI будут добавлены на следующих этапах.
+Запуск всей платформы пока не реализован.
+
+## Образ Airflow
+
+Базовый образ: `apache/airflow:3.4.0-python3.12`. Один образ будет использоваться
+всеми компонентами Airflow. Дополнительные зависимости устанавливаются при сборке
+от пользователя `airflow`; установка пакетов при запуске не требуется.
+
+В `requirements.txt` зафиксированы зависимости для CeleryExecutor, PostgreSQL,
+HTTP-запросов и FAB auth manager (вход по логину и паролю).
+Для потокового COPY используется Psycopg 3.
+
+В `docker/constraints-3.12.txt` сохранён официальный список совместимых версий:
+https://raw.githubusercontent.com/apache/airflow/constraints-3.4.0/constraints-3.12.txt
+
+Constraints ограничивают версии зависимостей, но не устанавливают все перечисленные
+пакеты. При обновлении Airflow нужно согласованно обновлять базовый образ,
+версию Airflow в команде pip, requirements и constraints.
+
+Сборка из каталога проекта:
+
+```powershell
+docker build -t geonames-airflow:dev .
+```
+
+Проверка образа без запуска платформы:
+
+```powershell
+docker run --rm geonames-airflow:dev python --version
+docker run --rm geonames-airflow:dev version
+docker run --rm geonames-airflow:dev pip check
+```
+
+В образ копируются DAG, общий Python-код и SQL. `.dockerignore` ограничивает
+контекст сборки необходимыми файлами, исключая `.env` и каталог `.git`.
 
 ## Настройки
 
