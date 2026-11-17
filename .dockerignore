@@ -6,6 +6,7 @@
 !docker/constraints-3.12.txt
 !docker/init-airflow.sh
 !docker/init-airflow.py
+!docker/check-dags.py
 !dags/
 !dags/**
 !src/

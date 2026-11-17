@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Ruff
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Python
+        uses: astral-sh/ruff-action@v3
+        with:
+          version: "0.17.5"
+          args: check --output-format=github
+
+  build-and-check:
+    name: Build image and check DAGs
+    needs: lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build project image
+        run: docker build --tag geonames-airflow:ci .
+      - name: Check installed dependencies
+        run: docker run --rm --network none --memory 512m --cpus 1 --entrypoint python geonames-airflow:ci -m pip check
+      - name: Import and validate all DAGs
+        run: >-
+          docker run --rm --network none --memory 512m --cpus 1
+          --entrypoint python geonames-airflow:ci /opt/airflow/docker/check-dags.py
+      - name: Test parsers without external services
+        run: >-
+          docker run --rm --network none --memory 512m --cpus 1
+          --mount type=bind,source="${{ github.workspace }}/tests",target=/checks,readonly
+          --entrypoint python geonames-airflow:ci -m unittest discover -s /checks
