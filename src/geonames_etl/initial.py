@@ -47,6 +47,7 @@ def iter_geonames(archive, member):
 def download_archive(name, destination):
     partial = destination.with_suffix(".zip.part")
     size = 0
+    next_progress = 64 * 1024**2
     with requests.get(
         f"https://download.geonames.org/export/dump/{name}.zip",
         stream=True, timeout=(15, 120),
@@ -59,6 +60,9 @@ def download_archive(name, destination):
                 if size > 2 * 1024**3:
                     raise ValueError("Archive exceeds 2 GiB")
                 target.write(chunk)
+                if size >= next_progress:
+                    LOG.info("Archive download progress: %s bytes", size)
+                    next_progress += 64 * 1024**2
     if size == 0:
         raise ValueError("Downloaded an empty archive")
     partial.replace(destination)
@@ -85,8 +89,11 @@ def replace_dataset(connection, archive, mode, source_modified):
             for row in iter_geonames(archive, f"{name}.txt"):
                 copy.write_row(row)
                 count += 1
+                if count % 500_000 == 0:
+                    LOG.info("COPY progress: %s rows", count)
         if count == 0:
             raise ValueError("No records; refusing to replace core.geoname")
+        LOG.info("COPY complete: %s rows; transforming staging to core", count)
         cursor.execute(Path("/opt/airflow/sql/transformations/initial_geoname.sql").read_text())
         cursor.execute("SELECT count(*) FROM core.geoname")
         if cursor.fetchone()[0] != count:
