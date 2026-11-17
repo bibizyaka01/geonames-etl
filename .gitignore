@@ -3,6 +3,23 @@
 .env.*
 !.env.example
 
+# Local notes, presentation drafts and recordings
+/.local/
+*.mp4
+*.mkv
+*.webm
+
+# Local credentials, database exports and temporary files
+*.pem
+*.key
+*.p12
+*.pfx
+*.dump
+*.backup
+*.sql.gz
+*.log
+*.tmp
+
 # Python and tools
 __pycache__/
 *.py[cod]
