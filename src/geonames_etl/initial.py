@@ -74,7 +74,7 @@ def replace_dataset(connection, archive, mode):
         cursor.execute(
             "INSERT INTO core.dataset_state (dataset, mode, row_count) VALUES ('geoname', %s, %s) "
             "ON CONFLICT (dataset) DO UPDATE SET mode=excluded.mode, "
-            "row_count=excluded.row_count, loaded_at=now()", (mode, count),
+            "row_count=excluded.row_count, loaded_at=now(), last_delta_date=NULL", (mode, count),
         )
     return count
 
