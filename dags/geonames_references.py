@@ -1,5 +1,6 @@
 """Daily reload of small GeoNames reference files."""
 
+import os
 from datetime import datetime, timedelta, timezone
 
 from airflow.sdk import dag, task
@@ -13,7 +14,7 @@ from airflow.sdk import dag, task
     catchup=False,
     default_args={"retries": 2, "retry_delay": timedelta(seconds=30)},
     max_active_runs=1,
-    max_active_tasks=1,
+    max_active_tasks=int(os.environ.get("GEONAMES_TASK_PARALLELISM", "1")),
     tags=["geonames", "references"],
 )
 def geonames_references():
@@ -23,11 +24,12 @@ def geonames_references():
 
         return load_reference(reference)
 
-    country = load.override(task_id="load_country")("country")
-    admin1 = load.override(task_id="load_admin1")("admin1")
-    features = load.override(task_id="load_feature_code")("feature_code")
-    timezones = load.override(task_id="load_timezone")("timezone")
-    country >> admin1 >> features >> timezones
+    # Each reference has separate staging/core tables and a per-reference lock.
+    # No data dependency exists between these four tasks.
+    load.override(task_id="load_country")("country")
+    load.override(task_id="load_admin1")("admin1")
+    load.override(task_id="load_feature_code")("feature_code")
+    load.override(task_id="load_timezone")("timezone")
 
 
 geonames_references()
