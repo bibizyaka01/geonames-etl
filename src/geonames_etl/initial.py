@@ -3,14 +3,28 @@
 import io
 import logging
 import os
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from zipfile import ZipFile
+from zoneinfo import ZoneInfo
 
 import psycopg
 import requests
 
 LOG = logging.getLogger(__name__)
 DATASETS = {"lite": "cities15000", "full": "allCountries"}
+
+
+def parse_source_date(value):
+    if not value:
+        raise ValueError("Archive has no Last-Modified header; snapshot date is unknown")
+    try:
+        modified = parsedate_to_datetime(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError("Invalid archive Last-Modified header") from error
+    if modified.tzinfo is None or modified.utcoffset() is None:
+        raise ValueError("Archive Last-Modified must include a timezone")
+    return modified
 
 
 def iter_geonames(archive, member):
@@ -38,6 +52,7 @@ def download_archive(name, destination):
         stream=True, timeout=(15, 120),
     ) as response:
         response.raise_for_status()
+        modified = parse_source_date(response.headers.get("Last-Modified"))
         with partial.open("wb") as target:
             for chunk in response.iter_content(64 * 1024):
                 size += len(chunk)
@@ -48,9 +63,14 @@ def download_archive(name, destination):
         raise ValueError("Downloaded an empty archive")
     partial.replace(destination)
     LOG.info("Downloaded %s.zip: %s bytes", name, size)
+    return modified
 
 
-def replace_dataset(connection, archive, mode):
+def replace_dataset(connection, archive, mode, source_modified):
+    if source_modified.tzinfo is None or source_modified.utcoffset() is None:
+        raise ValueError("Source timestamp must include a timezone")
+    # GeoNames publishes directory timestamps in Central European time.
+    snapshot_date = source_modified.astimezone(ZoneInfo("Europe/Berlin")).date()
     name = DATASETS[mode]
     count = 0
     with connection.cursor() as cursor:
@@ -72,9 +92,13 @@ def replace_dataset(connection, archive, mode):
         if cursor.fetchone()[0] != count:
             raise ValueError("Staging and core counts differ")
         cursor.execute(
-            "INSERT INTO core.dataset_state (dataset, mode, row_count) VALUES ('geoname', %s, %s) "
+            "INSERT INTO core.dataset_state "
+            "(dataset, mode, row_count, source_last_modified, snapshot_date) "
+            "VALUES ('geoname', %s, %s, %s, %s) "
             "ON CONFLICT (dataset) DO UPDATE SET mode=excluded.mode, "
-            "row_count=excluded.row_count, loaded_at=now(), last_delta_date=NULL", (mode, count),
+            "row_count=excluded.row_count, loaded_at=now(), last_delta_date=NULL, "
+            "source_last_modified=excluded.source_last_modified, snapshot_date=excluded.snapshot_date",
+            (mode, count, source_modified, snapshot_date),
         )
     return count
 
@@ -88,13 +112,13 @@ def load_initial():
     directory = Path(os.environ.get("GEONAMES_DATA_DIR", "/opt/airflow/data")) / "initial"
     directory.mkdir(parents=True, exist_ok=True)
     archive = directory / f"{DATASETS[mode]}.zip"
-    download_archive(DATASETS[mode], archive)
+    source_modified = download_archive(DATASETS[mode], archive)
     settings = Connection.get("geonames_dwh")
     with psycopg.connect(
         host=settings.host, port=settings.port or 5432, dbname=settings.schema,
         user=settings.login, password=settings.password, connect_timeout=15,
     ) as connection:
-        count = replace_dataset(connection, archive, mode)
+        count = replace_dataset(connection, archive, mode, source_modified)
     # Commit has succeeded. Retain failed archives for diagnostics/retry.
     archive.unlink()
     LOG.info("Loaded core.geoname: mode=%s rows=%s; archive removed", mode, count)

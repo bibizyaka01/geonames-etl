@@ -1,9 +1,22 @@
 import tempfile
 import unittest
+from datetime import date
 from pathlib import Path
 from zipfile import ZipFile
+from zoneinfo import ZoneInfo
 
-from geonames_etl.initial import iter_geonames
+from geonames_etl.initial import iter_geonames, parse_source_date
+
+
+class SnapshotDateTests(unittest.TestCase):
+    def test_source_day_uses_central_european_timezone(self):
+        modified = parse_source_date("Mon, 16 Nov 2026 23:30:00 GMT")
+        self.assertEqual(modified.astimezone(ZoneInfo("Europe/Berlin")).date(), date(2026, 11, 17))
+
+    def test_missing_invalid_and_naive_headers_rejected(self):
+        for value in (None, "bad date", "Tue, 17 Nov 2026 03:00:00"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                parse_source_date(value)
 
 
 class InitialArchiveTests(unittest.TestCase):

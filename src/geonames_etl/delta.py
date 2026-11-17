@@ -48,7 +48,7 @@ def apply_delta(connection, publication_date, mode, modifications, deletes):
     with connection.cursor() as cursor:
         cursor.execute("SELECT pg_advisory_xact_lock(hashtext('geonames.geoname'))")
         cursor.execute(
-            "SELECT mode, COALESCE(last_delta_date, (loaded_at AT TIME ZONE 'UTC')::date) "
+            "SELECT mode, COALESCE(last_delta_date, snapshot_date), snapshot_date "
             "FROM core.dataset_state WHERE dataset='geoname' FOR UPDATE"
         )
         state = cursor.fetchone()
@@ -56,6 +56,8 @@ def apply_delta(connection, publication_date, mode, modifications, deletes):
             raise ValueError("Run initial load before delta")
         if state[0] != mode or mode not in ("lite", "full"):
             raise ValueError("Mode differs from initial load; reinitialize the dataset")
+        if state[2] is None:
+            raise ValueError("Snapshot source date unknown; rerun initial load")
         previous = state[1]
         if publication_date <= previous:
             return {"status": "already_processed", "publication_date": str(publication_date)}

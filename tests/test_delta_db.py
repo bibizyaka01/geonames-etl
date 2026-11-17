@@ -25,7 +25,8 @@ class DeltaTests(unittest.TestCase):
         self.connection.execute("DELETE FROM core.geoname")
         self.connection.execute("INSERT INTO core.geoname (geonameid,name) VALUES (1,'Original')")
         self.connection.execute(
-            "UPDATE core.dataset_state SET mode='full', loaded_at='2026-11-17 12:00:00+00', "
+            "UPDATE core.dataset_state SET mode='full', loaded_at='2026-11-30 12:00:00+00', "
+            "snapshot_date='2026-11-17', "
             "last_delta_date=NULL, row_count=1 WHERE dataset='geoname'"
         )
         self.modifications.write_text(self.row(1, "Updated") + self.row(2, "New"))
@@ -55,6 +56,12 @@ class DeltaTests(unittest.TestCase):
     def test_gap_rejected(self):
         with self.assertRaisesRegex(ValueError, "Missing delta"):
             apply_delta(self.connection, date(2026, 11, 19), "full", self.modifications, self.deletes)
+        self.assertEqual(self.rows(), [(1, "Original")])
+
+    def test_unknown_snapshot_rejected(self):
+        self.connection.execute("UPDATE core.dataset_state SET snapshot_date=NULL WHERE dataset='geoname'")
+        with self.assertRaisesRegex(ValueError, "Snapshot source date unknown"):
+            apply_delta(self.connection, date(2026, 11, 18), "full", self.modifications, self.deletes)
         self.assertEqual(self.rows(), [(1, "Original")])
 
     def test_bad_deletion_rolls_back_upsert_and_watermark(self):
