@@ -3,6 +3,7 @@
 import io
 import logging
 import os
+from datetime import timedelta
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from zipfile import ZipFile
@@ -80,6 +81,16 @@ def replace_dataset(connection, archive, mode, source_modified):
     with connection.cursor() as cursor:
         # Future delta loads must acquire the same lock.
         cursor.execute("SELECT pg_advisory_xact_lock(hashtext('geonames.geoname'))")
+        cursor.execute(
+            "SELECT source_last_modified, last_delta_date FROM core.dataset_state "
+            "WHERE dataset='geoname' FOR UPDATE"
+        )
+        state = cursor.fetchone()
+        if state:
+            if state[0] is not None and source_modified < state[0]:
+                raise ValueError("Snapshot is older than the currently loaded source")
+            if state[1] is not None and snapshot_date - timedelta(days=1) < state[1]:
+                raise ValueError("Snapshot is older than the latest applied delta")
         for reference in ("country", "admin1", "feature_code", "timezone"):
             cursor.execute(f"SELECT EXISTS (SELECT 1 FROM core.{reference})")
             if not cursor.fetchone()[0]:
@@ -95,6 +106,11 @@ def replace_dataset(connection, archive, mode, source_modified):
             raise ValueError("No records; refusing to replace core.geoname")
         LOG.info("COPY complete: %s rows; transforming staging to core", count)
         cursor.execute(Path("/opt/airflow/sql/transformations/initial_geoname.sql").read_text())
+        while True:
+            if cursor.statusmessage.startswith(("INSERT", "DELETE")):
+                LOG.info("Snapshot reconcile: %s", cursor.statusmessage)
+            if not cursor.nextset():
+                break
         cursor.execute("SELECT count(*) FROM core.geoname")
         if cursor.fetchone()[0] != count:
             raise ValueError("Staging and core counts differ")

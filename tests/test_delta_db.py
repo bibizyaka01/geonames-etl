@@ -42,33 +42,33 @@ class DeltaTests(unittest.TestCase):
 
     def test_full_upsert_delete_and_repeat(self):
         self.deletes.write_text("1\tOriginal\tdeleted\n")
-        apply_delta(self.connection, date(2026, 11, 18), "full", self.modifications, self.deletes)
+        apply_delta(self.connection, date(2026, 11, 17), "full", self.modifications, self.deletes)
         self.assertEqual(self.rows(), [(2, "New")])
-        result = apply_delta(self.connection, date(2026, 11, 18), "full", self.modifications, self.deletes)
+        result = apply_delta(self.connection, date(2026, 11, 17), "full", self.modifications, self.deletes)
         self.assertEqual(result["status"], "already_processed")
         self.assertEqual(self.rows(), [(2, "New")])
 
     def test_lite_updates_only_existing_ids(self):
         self.connection.execute("UPDATE core.dataset_state SET mode='lite' WHERE dataset='geoname'")
-        apply_delta(self.connection, date(2026, 11, 18), "lite", self.modifications, self.deletes)
+        apply_delta(self.connection, date(2026, 11, 17), "lite", self.modifications, self.deletes)
         self.assertEqual(self.rows(), [(1, "Updated")])
 
     def test_gap_rejected(self):
         with self.assertRaisesRegex(ValueError, "Missing delta"):
-            apply_delta(self.connection, date(2026, 11, 19), "full", self.modifications, self.deletes)
+            apply_delta(self.connection, date(2026, 11, 18), "full", self.modifications, self.deletes)
         self.assertEqual(self.rows(), [(1, "Original")])
 
     def test_unknown_snapshot_rejected(self):
         self.connection.execute("UPDATE core.dataset_state SET snapshot_date=NULL WHERE dataset='geoname'")
         with self.assertRaisesRegex(ValueError, "Snapshot source date unknown"):
-            apply_delta(self.connection, date(2026, 11, 18), "full", self.modifications, self.deletes)
+            apply_delta(self.connection, date(2026, 11, 17), "full", self.modifications, self.deletes)
         self.assertEqual(self.rows(), [(1, "Original")])
 
     def test_bad_deletion_rolls_back_upsert_and_watermark(self):
         self.deletes.write_text("not-a-number\tInvalid\tdeleted\n")
         with self.assertRaises(psycopg.DataError):
             with self.connection.transaction():
-                apply_delta(self.connection, date(2026, 11, 18), "full", self.modifications, self.deletes)
+                apply_delta(self.connection, date(2026, 11, 17), "full", self.modifications, self.deletes)
         self.assertEqual(self.rows(), [(1, "Original")])
         self.assertIsNone(self.connection.execute(
             "SELECT last_delta_date FROM core.dataset_state WHERE dataset='geoname'"

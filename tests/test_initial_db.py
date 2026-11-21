@@ -12,10 +12,10 @@ import psycopg
 from geonames_etl.initial import replace_dataset
 
 
-@unittest.skipUnless(os.environ.get("AIRFLOW_CONN_GEONAMES_DWH"), "Needs running DWH")
+@unittest.skipUnless(os.environ.get("SNAPSHOT_TEST_DATABASE", "").startswith("geonames_snapshot_tests_"), "Needs isolated snapshot test DB")
 class InitialRollbackTests(unittest.TestCase):
     def snapshot(self):
-        with psycopg.connect(os.environ["AIRFLOW_CONN_GEONAMES_DWH"]) as connection:
+        with psycopg.connect(os.environ["AIRFLOW_CONN_GEONAMES_DWH"], dbname=os.environ["SNAPSHOT_TEST_DATABASE"]) as connection:
             core = connection.execute(
                 "SELECT count(*), sum(geonameid) FROM core.geoname"
             ).fetchone()
@@ -30,7 +30,8 @@ class InitialRollbackTests(unittest.TestCase):
             with ZipFile(archive, "w") as zipped:
                 zipped.writestr("cities15000.txt", content)
             with self.assertRaises(error):
-                with psycopg.connect(os.environ["AIRFLOW_CONN_GEONAMES_DWH"]) as connection:
+                with psycopg.connect(os.environ["AIRFLOW_CONN_GEONAMES_DWH"], dbname=os.environ["SNAPSHOT_TEST_DATABASE"]) as connection:
+                    connection.execute("UPDATE core.dataset_state SET source_last_modified=NULL,last_delta_date=NULL")
                     replace_dataset(connection, archive, "lite", datetime(2026, 11, 17, tzinfo=timezone.utc))
         self.assertEqual(self.snapshot(), before)
 
@@ -50,8 +51,10 @@ class InitialRollbackTests(unittest.TestCase):
             with ZipFile(archive, "w") as zipped:
                 zipped.writestr("cities15000.txt", "\t".join(["1", "Fixture"] + [""] * 17) + "\n")
             try:
-                with psycopg.connect(os.environ["AIRFLOW_CONN_GEONAMES_DWH"]) as connection:
+                with psycopg.connect(os.environ["AIRFLOW_CONN_GEONAMES_DWH"], dbname=os.environ["SNAPSHOT_TEST_DATABASE"]) as connection:
+                    connection.execute("UPDATE core.dataset_state SET source_last_modified=NULL,last_delta_date=NULL")
                     modified = datetime(2026, 11, 15, 12, tzinfo=timezone.utc)
+                    connection.execute("UPDATE core.dataset_state SET source_last_modified=NULL,last_delta_date=NULL")
                     replace_dataset(connection, archive, "lite", modified)
                     state = connection.execute(
                         "SELECT source_last_modified,snapshot_date,last_delta_date "

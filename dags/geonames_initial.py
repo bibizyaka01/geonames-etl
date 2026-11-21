@@ -1,4 +1,4 @@
-"""Manual initial load. Re-running replaces the entire geoname dataset."""
+"""Manual snapshot load: reconcile new, changed and removed GeoNames records."""
 
 from datetime import datetime, timedelta, timezone
 

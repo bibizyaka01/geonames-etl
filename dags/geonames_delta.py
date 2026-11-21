@@ -13,7 +13,7 @@ from airflow.sdk import Param, dag, get_current_context, task
     max_active_runs=1,
     max_active_tasks=1,
     default_args={"retries": 3, "retry_delay": timedelta(minutes=30)},
-    params={"publication_date": Param("", type="string", pattern=r"^$|^\d{4}-\d{2}-\d{2}$")},
+    params={"change_date": Param("", type="string", pattern=r"^$|^\d{4}-\d{2}-\d{2}$")},
     tags=["geonames", "delta"],
 )
 def geonames_delta():
@@ -22,9 +22,11 @@ def geonames_delta():
         from geonames_etl.delta import load_delta
 
         context = get_current_context()
-        publication = context["params"]["publication_date"]
+        publication = context["params"]["change_date"]
         if not publication:
-            publication = context["data_interval_end"].in_timezone("UTC").date().isoformat()
+            publication = (
+                context["data_interval_end"].in_timezone("UTC").date() - timedelta(days=1)
+            ).isoformat()
         return load_delta(publication)
 
     load()
